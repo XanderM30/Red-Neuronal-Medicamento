@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+env/
+venv/
+
+# TensorFlow / Keras
+*.h5
+*.tflite
+
+# Firebase keys
+firebase_config/serviceAccountKey.json
+
+# OS / IDE
+.DS_Store
+Thumbs.db
+.vscode/
+git add .
