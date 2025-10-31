@@ -64,27 +64,34 @@ def hash_datos(X_raw, Y_raw):
 def generar_tflite(model):
     """Convierte el modelo Keras actual a formato TFLite y lo guarda."""
     print("⚙️ Generando modelo TFLite...")
+
     try:
         converter = tf.lite.TFLiteConverter.from_keras_model(model)
 
-        # ✅ Solución para GRU/LSTM y TensorListReserve
+        # ✅ Habilitar soporte extendido para GRU/LSTM y TensorList
         converter.target_spec.supported_ops = [
             tf.lite.OpsSet.TFLITE_BUILTINS,
             tf.lite.OpsSet.SELECT_TF_OPS
         ]
+
+        # 🚫 Evita que TensorList sea reducido (esto es lo que causaba tu error)
         converter._experimental_lower_tensor_list_ops = False
 
+        # ⚙️ (Opcional) optimización ligera
+        converter.optimizations = [tf.lite.Optimize.DEFAULT]
+
+        # 🔄 Convertir modelo
         tflite_model = converter.convert()
 
-        # 📝 Crear o reemplazar el archivo .tflite
+        # 💾 Guardar el modelo convertido
         with open(TFLITE_FILE, "wb") as f:
             f.write(tflite_model)
-        print("✅ Modelo TFLite generado o actualizado correctamente.")
+
+        print("✅ Modelo TFLite generado correctamente y compatible con Flutter (Select TF Ops activado).")
 
     except Exception as e:
         print(f"❌ Error al convertir a TFLite: {e}")
         sys.exit(1)
-
 
 # -------------------------
 # ARCHIVOS LOCALES
