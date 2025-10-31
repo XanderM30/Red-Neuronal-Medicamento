@@ -8,7 +8,7 @@ venv/
 
 # TensorFlow / Keras
 *.h5
-*.tflite
+.tflite
 
 # Firebase keys
 firebase_config/serviceAccountKey.json
