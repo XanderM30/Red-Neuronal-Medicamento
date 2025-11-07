@@ -1,1 +1,17 @@
-{"<UNK>": 1, "antibiótico": 2, "del": 3, "grupo": 4, "de": 5, "las": 6, "penicilinas": 7, "antiinflamatorio": 8, "no": 9, "esteroideo": 10, "aine": 11, "medicamento": 12, "analgésico": 13, "y": 14, "antipirético": 15}
+{
+  "<UNK>": 1,
+  "antibiótico": 2,
+  "del": 3,
+  "grupo": 4,
+  "de": 5,
+  "las": 6,
+  "penicilinas": 7,
+  "antiinflamatorio": 8,
+  "no": 9,
+  "esteroideo": 10,
+  "aine": 11,
+  "medicamento": 12,
+  "analgésico": 13,
+  "y": 14,
+  "antipirético": 15
+}

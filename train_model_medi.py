@@ -10,6 +10,7 @@ from tensorflow.keras.preprocessing.sequence import pad_sequences
 from sklearn.preprocessing import LabelBinarizer
 import firebase_admin
 from firebase_admin import credentials, firestore
+import json
 
 # -------------------------
 # CONFIGURACIÓN FIREBASE
@@ -68,26 +69,20 @@ def generar_tflite(model):
     try:
         converter = tf.lite.TFLiteConverter.from_keras_model(model)
 
-        # ✅ Habilitar soporte extendido para GRU/LSTM y TensorList
+        # ✅ Soporte extendido (para GRU/LSTM y TensorList)
         converter.target_spec.supported_ops = [
             tf.lite.OpsSet.TFLITE_BUILTINS,
             tf.lite.OpsSet.SELECT_TF_OPS
         ]
-
-        # 🚫 Evita que TensorList sea reducido (esto es lo que causaba tu error)
         converter._experimental_lower_tensor_list_ops = False
-
-        # ⚙️ (Opcional) optimización ligera
         converter.optimizations = [tf.lite.Optimize.DEFAULT]
 
-        # 🔄 Convertir modelo
         tflite_model = converter.convert()
 
-        # 💾 Guardar el modelo convertido
         with open(TFLITE_FILE, "wb") as f:
             f.write(tflite_model)
 
-        print("✅ Modelo TFLite generado correctamente y compatible con Flutter (Select TF Ops activado).")
+        print("✅ Modelo TFLite generado correctamente y compatible con Flutter.")
 
     except Exception as e:
         print(f"❌ Error al convertir a TFLite: {e}")
@@ -102,6 +97,8 @@ TFLITE_FILE = "modelo_medicamentos_dinamico.tflite"
 TOKENIZER_FILE = "tokenizer.pkl"
 ENCODERS_FILE = "label_encoders.pkl"
 VERSION_FILE = "version.txt"
+TOKENIZER_JSON = "tokenizer.json"
+ENCODERS_JSON = "label_encoders.json"
 
 # -------------------------
 # OBTENER Y PROCESAR DATOS
@@ -118,11 +115,47 @@ if os.path.exists(HASH_FILE):
 else:
     previous_hash = ""
 
+def cargar_pickle_seguro(path):
+    """Carga un archivo pickle de forma segura, detectando corrupción o vacío."""
+    if not os.path.exists(path):
+        print(f"⚠️ No se encontró {path}, será regenerado.")
+        return None
+    try:
+        with open(path, "rb") as f:
+            obj = pickle.load(f)
+        if obj is None:
+            raise ValueError("Archivo vacío.")
+        return obj
+    except Exception as e:
+        print(f"⚠️ Error al cargar {path}: {e}. Será regenerado.")
+        return None
+
+
+# -------------------------
+# DECISIÓN: USAR MODELO EXISTENTE O ENTRENAR NUEVO
+# -------------------------
 if current_hash == previous_hash and os.path.exists(MODEL_FILE):
-    print("✅ No hay cambios en Firebase. Se mantiene el modelo anterior.")
-    model = tf.keras.models.load_model(MODEL_FILE)
+    print("✅ No hay cambios en Firebase. Intentando cargar modelo existente...")
+
+    model = None
+    tokenizer = None
+    label_encoders = None
+
+    try:
+        model = tf.keras.models.load_model(MODEL_FILE)
+    except Exception as e:
+        print(f"⚠️ Error al cargar modelo H5: {e}. Será reentrenado.")
+
+    tokenizer = cargar_pickle_seguro(TOKENIZER_FILE)
+    label_encoders = cargar_pickle_seguro(ENCODERS_FILE)
+
+    # Si alguno falla, reentrenamos
+    if model is None or tokenizer is None or label_encoders is None:
+        print("🔁 Archivos incompletos o corruptos. Se reentrenará el modelo.")
+        previous_hash = ""  # Forzamos reentrenamiento
 else:
     print("⚡ Cambios detectados en Firebase. Entrenando modelo...")
+
 
     # TOKENIZACIÓN
     tokenizer = tf.keras.preprocessing.text.Tokenizer(oov_token="<UNK>")
@@ -165,7 +198,7 @@ else:
     # ENTRENAMIENTO
     model.fit(X_pad, Y_enc, epochs=15, batch_size=16, verbose=1)
 
-    # GUARDAR ARTEFACTOS
+    # GUARDAR MODELO Y OBJETOS
     model.save(MODEL_FILE)
     with open(TOKENIZER_FILE, "wb") as f:
         pickle.dump(tokenizer, f)
@@ -177,77 +210,82 @@ else:
     print("✅ Modelo entrenado y guardado correctamente.")
 
 # -------------------------
-# VERIFICAR O GENERAR TFLITE
+# GENERAR O VALIDAR TFLITE
 # -------------------------
 print("🔍 Verificando o generando modelo TFLite...")
 
 if not os.path.exists(TFLITE_FILE):
-    print("⚠️ No se encontró el archivo .tflite. Creándolo por primera vez...")
     generar_tflite(model)
 else:
     try:
         interpreter = tf.lite.Interpreter(model_path=TFLITE_FILE)
         interpreter.allocate_tensors()
-        print("✅ Verificación exitosa: el modelo TFLite actual es válido.")
+        print("✅ Modelo TFLite actual válido.")
     except Exception as e:
-        print(f"⚠️ El modelo TFLite existente es inválido o está dañado: {e}")
-        print("🔁 Regenerando modelo TFLite...")
+        print(f"⚠️ Modelo TFLite inválido: {e}")
         generar_tflite(model)
 
 # -------------------------
-# CONTROL DE VERSIONES (numérico incremental)
+# CONTROL DE VERSIONES
 # -------------------------
+version_number = 0
 if os.path.exists(VERSION_FILE):
     with open(VERSION_FILE, "r") as f:
-        content = f.read().strip()
-    try:
-        version_number = int(content)
-    except ValueError:
-        version_number = 0
-else:
-    version_number = 0
-
+        try:
+            version_number = int(f.read().strip())
+        except ValueError:
+            version_number = 0
 version_number += 1
 with open(VERSION_FILE, "w") as f:
     f.write(str(version_number))
-
 print(f"🧾 Nueva versión generada: {version_number}")
-
-
-# -------------------------
-# GUARDAR ARTEFACTOS
-# -------------------------
-model.save(MODEL_FILE)
-
-# Guardar tokenizer en pickle
-with open(TOKENIZER_FILE, "wb") as f:
-    pickle.dump(tokenizer, f)
 
 # Guardar tokenizer en JSON (para Flutter)
 tokenizer_json_file = "tokenizer.json"
-with open(tokenizer_json_file, "w", encoding="utf-8") as f:
-    import json
-    json.dump(tokenizer.word_index, f, ensure_ascii=False)
-    print(f"✅ Tokenizer guardado en JSON: {tokenizer_json_file}")
 
-# Guardar encoders
-with open(ENCODERS_FILE, "wb") as f:
-    pickle.dump(label_encoders, f)
+# -------------------------
+# VERIFICAR EXISTENCIA DE TOKENIZER Y ENCODERS
+# -------------------------
+if 'tokenizer' not in locals() or tokenizer is None:
+    print("⚠️ Tokenizer no encontrado en memoria. Regenerando a partir del modelo existente...")
+    from tensorflow.keras.preprocessing.text import Tokenizer
+    tokenizer = tf.keras.preprocessing.text.Tokenizer(oov_token="<UNK>")
+    tokenizer.fit_on_texts(X_raw)
+    print("✅ Tokenizer regenerado correctamente.")
 
-# Guardar hash
-with open(HASH_FILE, "w") as f:
-    f.write(current_hash)
+if 'label_encoders' not in locals() or label_encoders is None:
+    print("⚠️ Label encoders no encontrados en memoria. Regenerando...")
+    from sklearn.preprocessing import LabelBinarizer
+    label_encoders = {}
+    for key, values in Y_raw.items():
+        lb = LabelBinarizer()
+        lb.fit(values)
+        label_encoders[key] = lb
+    print("✅ Label encoders regenerados correctamente.")
+
+# -------------------------
+# EXPORTAR TOKENIZER Y LABELS A JSON
+# -------------------------
+# Tokenizer (para Flutter)
+with open(TOKENIZER_JSON, "w", encoding="utf-8") as f:
+    json.dump(tokenizer.word_index, f, ensure_ascii=False, indent=2)
+print(f"✅ Tokenizer exportado a {TOKENIZER_JSON}")
+
+# Label encoders (para Flutter)
+encoders_export = {key: list(lb.classes_) for key, lb in label_encoders.items()}
+with open(ENCODERS_JSON, "w", encoding="utf-8") as f:
+    json.dump(encoders_export, f, ensure_ascii=False, indent=2)
+print(f"✅ Label encoders exportados a {ENCODERS_JSON}")
 
 # -------------------------
 # AVISO FINAL
 # -------------------------
-print("\n🚀 El modelo está listo para subir manualmente a GitHub.")
-print("   Archivos generados o actualizados:")
+print("\n🚀 El modelo está listo para subir a GitHub.")
 print(f"   - {MODEL_FILE}")
 print(f"   - {TFLITE_FILE}")
-print(f"   - {TOKENIZER_FILE}")
-print(f"   - {ENCODERS_FILE}")
-print(f"   - {VERSION_FILE}")
+print(f"   - {TOKENIZER_JSON}")
+print(f"   - {ENCODERS_JSON}")
+print(f"   - Versión: {version_number}")
 print("\n👉 Ejecuta manualmente:")
 print("   git add .")
 print(f'   git commit -m "Modelo actualizado versión {version_number}"')

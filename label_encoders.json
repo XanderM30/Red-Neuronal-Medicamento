@@ -1,0 +1,37 @@
+{
+  "dosis": [
+    "200–400 mg cada 6-8 horas.",
+    "500 mg cada 6-8 horas según necesidad.",
+    "500 mg cada 8 horas o según indicación médica."
+  ],
+  "presentacion": [
+    "Cápsulas de 500 mg, suspensión oral de 250 mg/5 ml.",
+    "Tabletas de 200–600 mg.",
+    "Tabletas de 500 mg y suspensión oral."
+  ],
+  "usos": [
+    "Alivio del dolor leve y reducción de fiebre.",
+    "Dolor, inflamación, fiebre.",
+    "Infecciones bacterianas respiratorias, urinarias y de piel."
+  ],
+  "reacciones": [
+    "Diarrea, náuseas, erupción cutánea, reacciones alérgicas.",
+    "Malestar estomacal, reflujo, mareo.",
+    "Náuseas, erupción cutánea, daño hepático en dosis altas."
+  ],
+  "contraindicaciones": [
+    "Alergia a penicilinas o cefalosporinas.",
+    "Enfermedad hepática grave.",
+    "Úlcera gástrica activa, insuficiencia renal."
+  ],
+  "tipo": [
+    "Analgésico",
+    "Antibiótico",
+    "Antiinflamatorio"
+  ],
+  "nombre": [
+    "Amoxicilina",
+    "Ibuprofeno",
+    "Paracetamol"
+  ]
+}
