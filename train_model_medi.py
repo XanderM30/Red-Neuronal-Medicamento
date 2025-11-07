@@ -90,36 +90,29 @@ def cargar_pickle_seguro(path):
         return None
 
 def generar_tflite(model):
-    """Convierte el modelo Keras a TFLite compatible con Flutter y operaciones LSTM/Dense."""
+    """Convierte el modelo Keras a TFLite compatible con Flutter + Flex delegate"""
     import tempfile
-    import os
+
     print("⚙️ Generando modelo TFLite (compatible con Flutter + Flex delegate)...")
 
     try:
-        # Crear carpeta temporal para exportar SavedModel
         with tempfile.TemporaryDirectory() as tmp_dir:
             saved_model_dir = os.path.join(tmp_dir, "saved_model")
             
-            # 🔹 Exportar el modelo como SavedModel (recomendado para TFLite)
+            # 🔹 Exportar modelo Keras 3 para TFLite
             model.export(saved_model_dir)
             print(f"✅ Modelo exportado temporalmente a: {saved_model_dir}")
 
-            # 🔹 Crear convertidor TFLite
+            # 🔹 Convertir a TFLite
             converter = tf.lite.TFLiteConverter.from_saved_model(saved_model_dir)
-
-            # 🔧 Incluir operaciones TFLite y Flex delegate
             converter.target_spec.supported_ops = [
-                tf.lite.OpsSet.TFLITE_BUILTINS,   # Operaciones básicas TFLite
-                tf.lite.OpsSet.SELECT_TF_OPS     # Flex delegate (para LSTM, operaciones avanzadas)
+                tf.lite.OpsSet.TFLITE_BUILTINS,
+                tf.lite.OpsSet.SELECT_TF_OPS
             ]
-
-            # 🔹 Optimización opcional
             converter.optimizations = [tf.lite.Optimize.DEFAULT]
 
-            # 🔹 Convertir
             tflite_model = converter.convert()
 
-            # 🔹 Guardar el TFLite final
             with open(TFLITE_FILE, "wb") as f:
                 f.write(tflite_model)
 
@@ -127,9 +120,7 @@ def generar_tflite(model):
 
     except Exception as e:
         print(f"❌ Error al convertir a TFLite: {e}")
-        import sys
         sys.exit(1)
-
 
 # -------------------------
 # OBTENER Y PROCESAR DATOS
