@@ -213,6 +213,31 @@ with open(VERSION_FILE, "w") as f:
 
 print(f"🧾 Nueva versión generada: {version_number}")
 
+
+# -------------------------
+# GUARDAR ARTEFACTOS
+# -------------------------
+model.save(MODEL_FILE)
+
+# Guardar tokenizer en pickle
+with open(TOKENIZER_FILE, "wb") as f:
+    pickle.dump(tokenizer, f)
+
+# Guardar tokenizer en JSON (para Flutter)
+tokenizer_json_file = "tokenizer.json"
+with open(tokenizer_json_file, "w", encoding="utf-8") as f:
+    import json
+    json.dump(tokenizer.word_index, f, ensure_ascii=False)
+    print(f"✅ Tokenizer guardado en JSON: {tokenizer_json_file}")
+
+# Guardar encoders
+with open(ENCODERS_FILE, "wb") as f:
+    pickle.dump(label_encoders, f)
+
+# Guardar hash
+with open(HASH_FILE, "w") as f:
+    f.write(current_hash)
+
 # -------------------------
 # AVISO FINAL
 # -------------------------
