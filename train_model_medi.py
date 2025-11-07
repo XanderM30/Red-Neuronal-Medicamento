@@ -64,21 +64,18 @@ def hash_datos(X_raw, Y_raw):
 
 
 def generar_tflite(model):
-    """Convierte el modelo Keras actual a formato TFLite y lo guarda."""
-    print("⚙️ Generando modelo TFLite...")
+    """Convierte el modelo Keras actual a formato TFLite compatible con Flutter."""
+    print("⚙️ Generando modelo TFLite (compatibilidad máxima)...")
 
     try:
         converter = tf.lite.TFLiteConverter.from_keras_model(model)
 
-        # ✅ Permitir tanto operaciones estándar como Select TF Ops (necesario para LSTM)
-        converter.target_spec.supported_ops = [
-            tf.lite.OpsSet.TFLITE_BUILTINS,
-            tf.lite.OpsSet.SELECT_TF_OPS
-        ]
-        converter._experimental_lower_tensor_list_ops = False
-        converter.experimental_new_converter = True
+        # 🔧 Compatibilidad con versiones antiguas de TFLite
+        converter.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS]
+        converter.experimental_new_converter = False  # <-- CAMBIO CLAVE
+        converter._experimental_lower_tensor_list_ops = True
 
-        # ✅ Optimización para móviles
+        # Opcional: optimización
         converter.optimizations = [tf.lite.Optimize.DEFAULT]
 
         tflite_model = converter.convert()
@@ -86,8 +83,7 @@ def generar_tflite(model):
         with open(TFLITE_FILE, "wb") as f:
             f.write(tflite_model)
 
-        print("✅ Modelo TFLite generado correctamente (con soporte SELECT_TF_OPS).")
-        print("⚙️ Asegúrate de incluir 'tensorflow-lite-select-tf-ops' en tu app Flutter o Android.")
+        print("✅ Modelo TFLite generado correctamente (retrocompatible).")
 
     except Exception as e:
         print(f"❌ Error al convertir a TFLite: {e}")
