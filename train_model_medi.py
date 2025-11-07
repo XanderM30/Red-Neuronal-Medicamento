@@ -5,7 +5,7 @@ import hashlib
 import numpy as np
 import tensorflow as tf
 from tensorflow.keras.models import Model
-from tensorflow.keras.layers import Input, Embedding, GRU, Dense, LSTM
+from tensorflow.keras.layers import Input, Embedding, LSTM, Dense
 from tensorflow.keras.preprocessing.sequence import pad_sequences
 from sklearn.preprocessing import LabelBinarizer
 import firebase_admin
@@ -26,6 +26,19 @@ if not firebase_admin._apps:
     firebase_admin.initialize_app(cred)
 
 db = firestore.client()
+
+# -------------------------
+# ARCHIVOS LOCALES
+# -------------------------
+HASH_FILE = "data_hash.txt"
+MODEL_FILE = "modelo_medicamentos_dinamico.h5"
+TFLITE_FILE = "modelo_medicamentos_dinamico.tflite"
+TOKENIZER_FILE = "tokenizer.pkl"
+ENCODERS_FILE = "label_encoders.pkl"
+VERSION_FILE = "version.txt"
+TOKENIZER_JSON = "tokenizer.json"
+ENCODERS_JSON = "label_encoders.json"
+REPORT_FILE = "training_report.json"
 
 # -------------------------
 # FUNCIONES
@@ -51,7 +64,6 @@ def obtener_datos(text_field='descripcion'):
 
     return X_raw, Y_raw
 
-
 def hash_datos(X_raw, Y_raw):
     """Genera un hash para detectar cambios en los datos"""
     m = hashlib.md5()
@@ -62,36 +74,8 @@ def hash_datos(X_raw, Y_raw):
             m.update(str(y).encode('utf-8'))
     return m.hexdigest()
 
-
-def generar_tflite(model):
-    """Convierte el modelo Keras actual a formato TFLite compatible con Flutter."""
-    print("⚙️ Generando modelo TFLite (compatibilidad máxima)...")
-
-    try:
-        converter = tf.lite.TFLiteConverter.from_keras_model(model)
-
-        # 🔧 Compatibilidad con versiones antiguas de TFLite
-        converter.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS]
-        converter.experimental_new_converter = False  # <-- CAMBIO CLAVE
-        converter._experimental_lower_tensor_list_ops = True
-
-        # Opcional: optimización
-        converter.optimizations = [tf.lite.Optimize.DEFAULT]
-
-        tflite_model = converter.convert()
-
-        with open(TFLITE_FILE, "wb") as f:
-            f.write(tflite_model)
-
-        print("✅ Modelo TFLite generado correctamente (retrocompatible).")
-
-    except Exception as e:
-        print(f"❌ Error al convertir a TFLite: {e}")
-        sys.exit(1)
-
-
 def cargar_pickle_seguro(path):
-    """Carga un archivo pickle de forma segura, detectando corrupción o vacío."""
+    """Carga un archivo pickle de forma segura"""
     if not os.path.exists(path):
         print(f"⚠️ No se encontró {path}, será regenerado.")
         return None
@@ -105,57 +89,80 @@ def cargar_pickle_seguro(path):
         print(f"⚠️ Error al cargar {path}: {e}. Será regenerado.")
         return None
 
+def generar_tflite(model):
+    """Convierte el modelo Keras a TFLite compatible con Flutter y operaciones LSTM/Dense."""
+    import tempfile
+    import os
+    print("⚙️ Generando modelo TFLite (compatible con Flutter + Flex delegate)...")
 
-# -------------------------
-# ARCHIVOS LOCALES
-# -------------------------
-HASH_FILE = "data_hash.txt"
-MODEL_FILE = "modelo_medicamentos_dinamico.h5"
-TFLITE_FILE = "modelo_medicamentos_dinamico.tflite"
-TOKENIZER_FILE = "tokenizer.pkl"
-ENCODERS_FILE = "label_encoders.pkl"
-VERSION_FILE = "version.txt"
-TOKENIZER_JSON = "tokenizer.json"
-ENCODERS_JSON = "label_encoders.json"
-REPORT_FILE = "training_report.json"
+    try:
+        # Crear carpeta temporal para exportar SavedModel
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            saved_model_dir = os.path.join(tmp_dir, "saved_model")
+            
+            # 🔹 Exportar el modelo como SavedModel (recomendado para TFLite)
+            model.export(saved_model_dir)
+            print(f"✅ Modelo exportado temporalmente a: {saved_model_dir}")
+
+            # 🔹 Crear convertidor TFLite
+            converter = tf.lite.TFLiteConverter.from_saved_model(saved_model_dir)
+
+            # 🔧 Incluir operaciones TFLite y Flex delegate
+            converter.target_spec.supported_ops = [
+                tf.lite.OpsSet.TFLITE_BUILTINS,   # Operaciones básicas TFLite
+                tf.lite.OpsSet.SELECT_TF_OPS     # Flex delegate (para LSTM, operaciones avanzadas)
+            ]
+
+            # 🔹 Optimización opcional
+            converter.optimizations = [tf.lite.Optimize.DEFAULT]
+
+            # 🔹 Convertir
+            tflite_model = converter.convert()
+
+            # 🔹 Guardar el TFLite final
+            with open(TFLITE_FILE, "wb") as f:
+                f.write(tflite_model)
+
+        print(f"✅ Modelo TFLite generado correctamente en: {TFLITE_FILE}")
+
+    except Exception as e:
+        print(f"❌ Error al convertir a TFLite: {e}")
+        import sys
+        sys.exit(1)
+
 
 # -------------------------
 # OBTENER Y PROCESAR DATOS
 # -------------------------
 X_raw, Y_raw = obtener_datos()
 current_hash = hash_datos(X_raw, Y_raw)
+
 previous_hash = ""
 if os.path.exists(HASH_FILE):
     with open(HASH_FILE, "r") as f:
         previous_hash = f.read().strip()
 
+tokenizer = cargar_pickle_seguro(TOKENIZER_FILE)
+label_encoders = cargar_pickle_seguro(ENCODERS_FILE)
+model = None
+
 # -------------------------
-# ENTRENAMIENTO O CARGA
+# DECIDIR CARGAR O ENTRENAR
 # -------------------------
-if current_hash == previous_hash and os.path.exists(MODEL_FILE):
+if current_hash == previous_hash and os.path.exists(MODEL_FILE) and tokenizer and label_encoders:
     print("✅ No hay cambios en Firebase. Cargando modelo existente...")
     model = tf.keras.models.load_model(MODEL_FILE)
-    tokenizer = cargar_pickle_seguro(TOKENIZER_FILE)
-if tokenizer is None:
-    print("🔁 Regenerando tokenizer...")
-    tokenizer = tf.keras.preprocessing.text.Tokenizer(oov_token="<UNK>")
-    tokenizer.fit_on_texts(X_raw)
-
-label_encoders = cargar_pickle_seguro(ENCODERS_FILE)
-if label_encoders is None:
-    label_encoders = {}
-
 else:
-    print("⚡ Cambios detectados. Entrenando modelo...")
+    print("⚡ Cambios detectados o modelo inexistente. Entrenando modelo...")
 
-    # TOKENIZACIÓN
+    # Tokenización
     tokenizer = tf.keras.preprocessing.text.Tokenizer(oov_token="<UNK>")
     tokenizer.fit_on_texts(X_raw)
     X_seq = tokenizer.texts_to_sequences(X_raw)
     max_len = max(len(seq) for seq in X_seq)
     X_pad = pad_sequences(X_seq, maxlen=max_len, padding='post')
 
-    # CODIFICACIÓN DE SALIDAS
+    # Codificación de salidas
     label_encoders = {}
     Y_enc = []
     for key, values in Y_raw.items():
@@ -166,7 +173,7 @@ else:
         Y_enc.append(encoded)
         label_encoders[key] = lb
 
-    # MODELO (se reemplaza GRU → LSTM por compatibilidad TFLite)
+    # Construcción del modelo
     vocab_size = len(tokenizer.word_index) + 1
     embedding_dim = 64
 
@@ -185,18 +192,18 @@ else:
         'categorical_crossentropy' if y.shape[1] > 1 else 'binary_crossentropy'
         for y in Y_enc
     ]
-    model.compile(optimizer='adam', loss=losses, metrics=['accuracy'] * len(Y_enc))
+    model.compile(optimizer='adam', loss=losses, metrics=['accuracy']*len(Y_enc))
 
-    # ENTRENAMIENTO CON VALIDACIÓN
+    # Entrenamiento
     history = model.fit(
         X_pad, Y_enc,
         validation_split=0.2,
         epochs=15,
         batch_size=16,
-        verbose=1
+        verbose=2
     )
 
-    # GUARDAR MODELO Y OBJETOS
+    # Guardar modelo y objetos
     model.save(MODEL_FILE)
     with open(TOKENIZER_FILE, "wb") as f:
         pickle.dump(tokenizer, f)
@@ -207,7 +214,7 @@ else:
 
     print("✅ Modelo entrenado y guardado correctamente.")
 
-    # 📊 GUARDAR MÉTRICAS
+    # Guardar reporte
     report = {
         "epochs": len(history.history["loss"]),
         "batch_size": 16,
@@ -222,10 +229,10 @@ else:
         json.dump(report, f, indent=2)
     print(f"📈 Reporte de entrenamiento guardado en {REPORT_FILE}")
 
-    # GRAFICAR Y GUARDAR PNG
-    plt.figure(figsize=(10, 5))
-    plt.plot(history.history["accuracy"], label="Entrenamiento", color='blue')
-    plt.plot(history.history["val_accuracy"], label="Validación", color='orange')
+    # Gráficos
+    plt.figure(figsize=(10,5))
+    plt.plot(history.history["accuracy"], label="Entrenamiento")
+    plt.plot(history.history["val_accuracy"], label="Validación")
     plt.title("Evolución de la Precisión")
     plt.xlabel("Épocas")
     plt.ylabel("Precisión")
@@ -233,10 +240,21 @@ else:
     plt.tight_layout()
     plt.savefig("training_accuracy.png")
     plt.close()
-    print("📊 Gráfica de entrenamiento guardada en training_accuracy.png")
+
+    plt.figure(figsize=(10,5))
+    plt.plot(history.history["loss"], label="Entrenamiento")
+    plt.plot(history.history["val_loss"], label="Validación")
+    plt.title("Evolución de la Pérdida")
+    plt.xlabel("Épocas")
+    plt.ylabel("Loss")
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig("training_loss.png")
+    plt.close()
+    print("📊 Gráficas de entrenamiento guardadas (accuracy y loss).")
 
 # -------------------------
-# VALIDAR O GENERAR TFLITE
+# TFLITE
 # -------------------------
 print("🔍 Verificando modelo TFLite...")
 try:
@@ -262,15 +280,19 @@ with open(VERSION_FILE, "w") as f:
     f.write(str(version_number))
 print(f"🧾 Nueva versión generada: {version_number}")
 
-## -------------------------
+# -------------------------
 # EXPORTAR A JSON
 # -------------------------
-if tokenizer is not None:
+if tokenizer:
+    tokenizer_export = {
+        "word_index": tokenizer.word_index,
+        "oov_token": tokenizer.oov_token
+    }
     with open(TOKENIZER_JSON, "w", encoding="utf-8") as f:
-        json.dump(tokenizer.word_index, f, ensure_ascii=False, indent=2)
+        json.dump(tokenizer_export, f, ensure_ascii=False, indent=2)
     print(f"✅ Tokenizer exportado a {TOKENIZER_JSON}")
 else:
-    print("⚠️ No se pudo exportar el tokenizer (no disponible o dañado).")
+    print("⚠️ No se pudo exportar el tokenizer.")
 
 if label_encoders:
     encoders_export = {key: list(lb.classes_) for key, lb in label_encoders.items()}
@@ -280,13 +302,10 @@ if label_encoders:
 else:
     print("⚠️ No se pudieron exportar los label encoders.")
 
-
-
-
 # -------------------------
 # AVISO FINAL
 # -------------------------
-print("\n🚀 El modelo está listo para subir a GitHub.")
+print("\n🚀 El modelo está listo para subir a GitHub:")
 print(f"   - {MODEL_FILE}")
 print(f"   - {TFLITE_FILE}")
 print(f"   - {TOKENIZER_JSON}")
